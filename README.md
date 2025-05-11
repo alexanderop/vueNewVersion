@@ -69,3 +69,5 @@ npm run build
 ```sh
 npm run lint
 ```
+
+[Documentation](https://deepwiki.com/alexanderop/vueNewVersion/1-overview)

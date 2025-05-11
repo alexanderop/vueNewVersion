@@ -37,48 +37,106 @@ export function gitCommitTimestamp(): string {
   }
 }
 
+// Functional Core: Data structures
+interface VersionDetails {
+  name: string
+  version: string
+  tag: string
+  commit: string
+  commitTime: string
+  created: string
+}
+
+interface VersionDataInput {
+  packageJsonString: string
+  gitTagValue: string
+  gitCommitValue: string
+  gitCommitTimestampValue: string
+  timestampForJsonCreation: string
+  timestampForDefaultVersion: string // For generating version if missing from package.json
+  pluginOptions: Options
+}
+
+interface ProcessedVersionInfo {
+  versionDetails: VersionDetails
+  defines?: Record<string, string>
+}
+
+// Functional Core: Pure function to generate version information
+function generateVersionInfo(input: VersionDataInput): ProcessedVersionInfo {
+  const pkg = JSON.parse(input.packageJsonString)
+  const defaultVersionString = input.timestampForDefaultVersion.replace(/[-:T]/g, '').slice(0, 15) // YYYYMMDDHHmmss
+  const version = pkg.version || defaultVersionString
+  const pkgName = pkg.name || 'unknown'
+
+  const versionDetails: VersionDetails = {
+    name: pkgName,
+    version,
+    tag: input.gitTagValue,
+    commit: input.gitCommitValue,
+    commitTime: input.gitCommitTimestampValue,
+    created: input.timestampForJsonCreation,
+  }
+
+  let defines: Record<string, string> | undefined
+  if (input.pluginOptions.define !== false) {
+    defines = {}
+    defines['import.meta.env.APP_VERSION'] = JSON.stringify(version)
+    if (input.pluginOptions.define !== 'minimal') {
+      defines['import.meta.env.APP_TAG'] = JSON.stringify(input.gitTagValue)
+    }
+  }
+
+  return { versionDetails, defines }
+}
+
+// Imperative Shell: Vite plugin
 export default function versionJson(opts: Options = {}): Plugin {
   const outFile = opts.output ?? 'version.json'
-  const doDefine = opts.define !== false
-  const minimal = opts.define === 'minimal'
+  // const doDefine = opts.define !== false // Retained for clarity, though logic is in generateVersionInfo
+  // const minimalDefine = opts.define === 'minimal' // Retained for clarity
 
-  let cfg: ResolvedConfig
-  let pkgName = ''
-  let version = ''
-  const tag = gitTag()
-  const commit = gitCommitHash()
-  const commitTime = gitCommitTimestamp()
-  let created = ''
+  let viteConfig: ResolvedConfig
+  let initialVersionDetails: VersionDetails // To store details from configResolved
 
   return {
-    name: 'my app',
+    name: 'my app', // Original name, kept as is
 
-    // ① read package.json and prepare version/tag
-    configResolved(res) {
-      cfg = res
-      const pkg = JSON.parse(readFileSync(resolve(cfg.root, 'package.json'), 'utf-8'))
-      pkgName = pkg.name || 'unknown'
-      version = pkg.version || new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15) // YYYYMMDDHHmmss
-      created = new Date().toISOString()
+    configResolved(resolvedConfig) {
+      viteConfig = resolvedConfig
+      const packageJsonPath = resolve(viteConfig.root, 'package.json')
+      const packageJsonString = readFileSync(packageJsonPath, 'utf-8')
 
-      // inject compile-time constants if wanted
-      if (doDefine) {
-        if (cfg.define) {
-          cfg.define['import.meta.env.APP_VERSION'] = JSON.stringify(version)
-          if (!minimal) cfg.define['import.meta.env.APP_TAG'] = JSON.stringify(tag)
+      const tag = gitTag()
+      const commit = gitCommitHash()
+      const commitTime = gitCommitTimestamp()
+      const nowISO = new Date().toISOString()
+
+      const processedInfo = generateVersionInfo({
+        packageJsonString,
+        gitTagValue: tag,
+        gitCommitValue: commit,
+        gitCommitTimestampValue: commitTime,
+        timestampForJsonCreation: nowISO,
+        timestampForDefaultVersion: nowISO,
+        pluginOptions: opts, // Pass opts directly as it conforms to Options type
+      })
+
+      initialVersionDetails = processedInfo.versionDetails
+
+      if (processedInfo.defines && viteConfig.define) {
+        for (const key in processedInfo.defines) {
+          viteConfig.define[key] = processedInfo.defines[key]
         }
       }
     },
 
-    // Serve /version.json dynamically during dev
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url === '/version.json') {
-          const payload = JSON.stringify(
-            { name: pkgName, version, tag, commit, commitTime, created },
-            null,
-            2,
-          )
+        if (req.url === `/${outFile}`) {
+          // Use outFile for dynamic path
+          // Serve with details captured at configResolved, including its 'created' time
+          const payload = JSON.stringify(initialVersionDetails, null, 2)
           res.setHeader('Content-Type', 'application/json')
           res.end(payload)
           return
@@ -87,18 +145,22 @@ export default function versionJson(opts: Options = {}): Plugin {
       })
     },
 
-    // ② emit version.json after build
     closeBundle() {
-      if (cfg.command !== 'build') return
+      if (viteConfig.command !== 'build') return
+
+      // For the final build, use the details from configResolved but update 'created' timestamp
       const now = new Date().toISOString()
-      const payload = JSON.stringify(
-        { name: pkgName, version, tag, commit, commitTime, created: now },
-        null,
-        2,
-      )
-      const outPath = resolve(cfg.root, cfg.build.outDir, outFile)
+      const finalPayloadObject: VersionDetails = {
+        ...initialVersionDetails,
+        created: now,
+      }
+      const payload = JSON.stringify(finalPayloadObject, null, 2)
+
+      const outPath = resolve(viteConfig.root, viteConfig.build.outDir, outFile)
       writeFileSync(outPath, payload, 'utf-8')
-      this.info(`📦  wrote ${cfg.build.outDir}/${outFile}`)
+      // Use this.info if available, otherwise console.log as a fallback
+      const logger = this && typeof this.info === 'function' ? this : console
+      logger.info(`📦  wrote ${viteConfig.build.outDir}/${outFile}`)
     },
   }
 }

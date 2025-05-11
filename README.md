@@ -1,6 +1,38 @@
 # vue-package-json
 
-This template should help get you started developing with Vue 3 in Vite.
+This template helps you get started with Vue 3 in Vite, and demonstrates how to dynamically generate and use a `version.json` file containing your app's version and git info.
+
+## Version Info POC: Dynamic version.json
+
+This project includes a custom Vite plugin that:
+
+- Reads version info from `package.json` and git (tag, commit hash, timestamp)
+- Injects compile-time constants (`import.meta.env.APP_VERSION`, `import.meta.env.APP_TAG`)
+- Serves `/version.json` dynamically during development
+- Emits `dist/version.json` after build
+
+### How to Use
+
+1. **Install dependencies:**
+   ```sh
+   npm install
+   ```
+2. **Run in development:**
+   ```sh
+   npm run dev
+   ```
+   - Visit the app to see version info from both compile-time and runtime
+   - Or visit `/version.json` directly in your browser
+3. **Build for production:**
+   ```sh
+   npm run build
+   ```
+   - After build, `dist/version.json` will contain the version info
+4. **Access version info in your app:**
+   - **Compile-time:** Use `import.meta.env.APP_VERSION` and `import.meta.env.APP_TAG`
+   - **Runtime:** Fetch `/version.json` (e.g., `fetch('/version.json')`)
+
+---
 
 ## Recommended IDE Setup
 
